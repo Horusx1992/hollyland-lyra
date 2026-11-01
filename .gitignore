@@ -1,0 +1,6 @@
+__pycache__/
+*.pyc
+artifacts/
+live-validation.json
+.ruff_cache/
+.pytest_cache/

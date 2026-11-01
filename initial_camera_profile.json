@@ -1,0 +1,15 @@
+{
+  "schema": 1,
+  "model": "C4502",
+  "source": "First verified Lyra readings, before image controls were changed; the device's def field is not an immutable factory default.",
+  "settings": {
+    "anti-flicker": {"value": "OFF", "automatic": false},
+    "white-balance": {"value": 5100, "automatic": true},
+    "shutter": {"value": "1/60", "automatic": true},
+    "iso": {"value": "250", "automatic": true},
+    "brightness": {"value": 0, "automatic": false},
+    "contrast": {"value": 0, "automatic": false},
+    "saturation": {"value": 0, "automatic": false},
+    "sharpness": {"value": 50, "automatic": false}
+  }
+}
