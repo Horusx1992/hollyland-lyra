@@ -12,61 +12,17 @@ import recording
 import gi
 gi.require_version('Gtk', '3.0')
 gi.require_version('Gdk', '3.0')
-from gi.repository import Gdk, GLib, Gtk
+from gi.repository import Gdk, GLib, Gtk, Pango
 
 import lyra_backend as camera
 import preferences
 import virtual_camera
-from video_preview import Preview, MODES, SHAPES
+from video_preview import Preview, MODES, SHAPES, GstVideo
 from camview import effects
 
 ROOT = Path(__file__).resolve().parent
-CSS = b'''
-window {background: #15181e; color: #f2f4f8; font-family: "Noto Sans", "DejaVu Sans"; font-size: 14px;}
-.title {font-size: 26px; font-weight: bold;}
-.muted {color: #b6bfce; font-size: 12px;}
-.status {color: #b6d3ff; padding: 10px; background: #202733; border-radius: 6px;}
-.card {background: #20242c; border: 1px solid #39414e; border-radius: 10px; padding: 18px;}
-.section {font-size: 17px; font-weight: bold;}
-.zoom-value {font-size: 36px; font-weight: bold; color: #ffffff;}
-button {background: #303844; color: #f2f4f8; border: 1px solid #556073; border-radius: 6px; min-height: 32px; padding: 4px 14px; box-shadow: none; text-shadow: none;}
-button:hover {background: #404d60;}
-button.primary {background: #245ecc; border-color: #679aff; color: #ffffff;}
-button.primary:hover {background: #306edb;}
-button:focus {outline: 2px solid #8bb6ff; outline-offset: 2px;}
-button:disabled {color: #a2aab7; background: #292e37; border-color: #464e5a;}
-spinbutton, combobox {min-height: 38px;}
-spinbutton {background: #171c24; color: #ffffff;}
-spinbutton:disabled {background: #292e37; color: #a2aab7;}
-combobox button, combobox cellview {color: #f2f4f8;}
-combobox button:disabled, combobox:disabled cellview {color: #a2aab7;}
-/* GTK popups inherit the text color, but system themes supply their background. */
-menu, popover {background: #202733; color: #f2f4f8; border: 1px solid #667284;}
-menu menuitem {background: #202733; color: #f2f4f8; min-height: 32px; padding: 4px 12px;}
-menu menuitem:hover, menu menuitem:selected {background: #245ecc; color: #ffffff;}
-menu menuitem:disabled {background: #202733; color: #a2aab7;}
-menu menuitem cellview, menu menuitem label {color: inherit;}
-spinbutton entry, entry {background: #171c24; color: #ffffff; border-color: #667284;}
-entry:disabled {color: #a2aab7; border-color: #464e5a; background: #292e37;}
-scale trough {background: #10151d; min-height: 6px;}
-scale highlight {background: #669bff;}
-scale slider {background: #bcd4ff; border: 1px solid #ffffff; min-width: 20px; min-height: 20px;}
-checkbutton {color: #f2f4f8; min-height: 36px;}
-separator {background: #39414e;}
-notebook, notebook stack, notebook header {background: #15181e; color: #f2f4f8; border-color: #39414e;}
-notebook header tab {background: #20242c; color: #b6bfce; padding: 12px 14px; border-bottom: 3px solid transparent;}
-notebook header tab:checked {background: #26354a; color: #ffffff; border-bottom-color: #79a8ff;}
-button.record {background: #a62438; border-color: #f27e8e; color: #ffffff;}
-button.record:hover {background: #bf3046;}
-.record-status {color: #b6bfce; font-weight: bold;}
-.record-status.recording {color: #ffb4be;}
-button.record:disabled {background: #292e37; border-color: #464e5a; color: #a2aab7;}
-progressbar trough {background: #10151d; border: 1px solid #556073; min-height: 8px;}
-progressbar progress {background: #73cfa5; min-height: 8px;}
-progressbar text {color: #b6bfce; font-size: 12px;}
-expander {color: #f2f4f8;}
+from ui_theme import CSS
 
-'''
 
 
 def label(text, css=None):
@@ -84,9 +40,20 @@ def button(text, callback, primary=False):
     return widget
 
 
+def icon_button(icon, title, callback):
+    widget = Gtk.Button.new_from_icon_name(icon, Gtk.IconSize.BUTTON)
+    widget.set_tooltip_text(title)
+    widget.get_accessible().set_name(title)
+    widget.get_style_context().add_class('icon-button')
+    widget.get_style_context().add_class('flat')
+    widget.connect('clicked', callback)
+    return widget
+
+
 class SettingRow(Gtk.Box):
     def __init__(self, window, name, setting, zoom=False):
-        super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        self.get_style_context().add_class('setting-row')
         self.window, self.name, self.setting, self.zoom = window, name, setting, zoom
         self._syncing = self._pending = False
         header = Gtk.Box(spacing=8)
@@ -94,6 +61,7 @@ class SettingRow(Gtk.Box):
         self.auto = None
         if name in ('white-balance', 'shutter', 'iso') or setting.get('isAuto', 2) != 2:
             self.auto = Gtk.CheckButton(label='Auto')
+            self.auto.get_accessible().set_name(f'Automatic {camera.SETTINGS[name]}')
             self.auto.set_active(setting['isAuto'] == 0)
             self.auto.connect('toggled', self.auto_toggled)
             self.auto.set_tooltip_text('Applies immediately and verifies camera state. Anti-flicker must be OFF for Auto shutter.')
@@ -117,7 +85,8 @@ class SettingRow(Gtk.Box):
         self.editor.set_hexpand(True)
         self.editor.get_accessible().set_name(camera.SETTINGS[name])
         controls.pack_start(self.editor, True, True, 0)
-        self.apply_button = button('Apply zoom' if zoom else 'Apply', self.apply, primary=zoom)
+        self.apply_button = button('Apply', self.apply)
+        self.apply_button.get_accessible().set_name(f'Apply {camera.SETTINGS[name]}')
         controls.pack_start(self.apply_button, False, False, 0)
         self.pack_start(controls, False, False, 0)
         if zoom:
@@ -134,15 +103,17 @@ class SettingRow(Gtk.Box):
             self.editor.connect('value-changed', lambda _: self._value_text())
             self._value_text()
         else:
-            text = 'Read-only on this camera' if setting.get('enable') != 1 else (
-                'Applied to the camera, including other apps' if 'list' in setting else
-                f"Range {setting['min']:g} to {setting['max']:g}")
-            self.pack_start(label(text, 'muted'), False, False, 0)
+            if setting.get('enable') != 1:
+                self.pack_start(label('Read-only on this camera', 'muted'), False, False, 0)
+            elif self.auto and setting.get('isAuto') == 2:
+                self.pack_start(label('Auto requires Anti-flicker OFF', 'muted'), False, False, 0)
+            elif 'list' not in setting:
+                self.editor.set_tooltip_text(f"Supported range: {setting['min']:g} to {setting['max']:g}")
         self._availability()
 
     def _availability(self):
         enabled = self.setting.get('enable') == 1 and self.name in camera.WRITABLE
-        self.apply_button.set_sensitive(enabled)
+        self.apply_button.set_sensitive(enabled and not (self.auto and self.auto.get_active()))
         self.editor.set_sensitive(enabled and not (self.auto and self.auto.get_active()))
         if self.auto:
             self.auto.set_sensitive(enabled and self.setting.get('isAuto') != 2 and not self._pending)
@@ -220,8 +191,8 @@ class Window(Gtk.Window):
         Gtk.Widget.set_default_direction(Gtk.TextDirection.LTR)
         super().__init__(title='Lyra Control')
         self.set_icon_from_file(str(ROOT/'assets/icon.svg'))
-        self.set_default_size(1280, 820)
-        self.set_size_request(1040, 660)
+        self.set_default_size(1360, 840)
+        self.set_size_request(980, 640)
         self.pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix='lyra-hid')
         self.record_pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix='lyra-record')
         self.closed = self.busy = self.record_finalizing = self.close_pending = False
@@ -241,30 +212,62 @@ class Window(Gtk.Window):
         provider.load_from_data(CSS)
         Gtk.StyleContext.add_provider_for_screen(Gdk.Screen.get_default(), provider,
                                                  Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
-        root = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=16)
-        root.set_border_width(20)
+        root = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         self.add(root)
         self.header = Gtk.Box(spacing=12)
-        title = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
-        title.pack_start(label('Lyra Control', 'title'), False, False, 0)
-        self.device_label = label('Camera, framing and recording in one workspace', 'muted')
-        title.pack_start(self.device_label, False, False, 0)
-        self.header.pack_start(title, True, True, 0)
-        self.preview_button = button('Start preview', self.preview)
-        self.refresh_button = button('Refresh camera', self.refresh)
+        self.header.get_style_context().add_class('workspace-header')
+        camera_icon = Gtk.Image.new_from_icon_name('camera-video-symbolic', Gtk.IconSize.LARGE_TOOLBAR)
+        camera_icon.get_style_context().add_class('brand-icon')
+        self.header.pack_start(camera_icon, False, False, 0)
+        brand = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
+        brand.pack_start(label('Lyra Control', 'title'), False, False, 0)
+        self.device_label = label('Connecting to Hollyland Lyra…', 'muted')
+        brand.pack_start(self.device_label, False, False, 0)
+        self.header.pack_start(brand, True, True, 0)
+        self.format_chip = label('4K · 30 fps', 'source-chip')
+        self.format_chip.get_style_context().add_class('mono')
+        self.header.pack_start(self.format_chip, False, False, 0)
+        self.preview_button = button('Start preview', self.preview, primary=True)
+        self.preview_button.set_image(Gtk.Image.new_from_icon_name('media-playback-start-symbolic', Gtk.IconSize.BUTTON))
+        self.preview_button.set_always_show_image(True)
+        self.refresh_button = icon_button('view-refresh-symbolic', 'Refresh camera', self.refresh)
         self.header.pack_start(self.preview_button, False, False, 0)
         self.header.pack_start(self.refresh_button, False, False, 0)
         root.pack_start(self.header, False, False, 0)
-        self.status = label('Connecting to camera…', 'status')
-        self.status.set_line_wrap(True)
-        self.status.set_selectable(True)
-        root.pack_start(self.status, False, False, 0)
         self.access_button = button('Allow camera access', self.grant_access)
         self.access_button.set_no_show_all(True)
-        root.pack_start(self.access_button, False, False, 0)
-        body = Gtk.Box(spacing=20)
+        root.pack_start(self.access_button, False, False, 8)
+        body = Gtk.Box(spacing=18)
+        body.set_border_width(16)
         root.pack_start(body, True, True, 0)
-        self.preview_panel = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
+        self.preview_panel = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        self.preview_panel.set_hexpand(True)
+        self.preview_heading = Gtk.Box(spacing=10)
+        self.preview_heading.get_style_context().add_class('preview-heading')
+        self.preview_heading.pack_start(label('LIVE VIEW', 'eyebrow'), False, False, 0)
+        self.preview_badge = label('STOPPED', 'badge')
+        self.preview_heading.pack_start(self.preview_badge, False, False, 0)
+        self.preview_options = Gtk.Box(spacing=4)
+        self.preview_options.pack_start(icon_button('view-reveal-symbolic', 'Picture only · Esc restores controls', lambda _: self.set_preview_only(True)), False, False, 0)
+        self.preview_options.pack_start(icon_button('view-fullscreen-symbolic', 'Fullscreen · F / F11', lambda _: self.toggle_fullscreen()), False, False, 0)
+        menu = Gtk.MenuButton()
+        menu.set_image(Gtk.Image.new_from_icon_name('view-more-symbolic', Gtk.IconSize.BUTTON))
+        menu.get_style_context().add_class('icon-button')
+        menu.get_style_context().add_class('flat')
+        menu.set_tooltip_text('Window options')
+        menu.get_accessible().set_name('Window options')
+        popover = Gtk.Popover.new(menu)
+        popover_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        popover_box.set_border_width(12)
+        top = Gtk.CheckButton(label='Keep window above others')
+        top.connect('toggled', lambda item: self.set_keep_above(item.get_active()))
+        popover_box.pack_start(top, False, False, 0)
+        popover.add(popover_box)
+        menu.set_popover(popover)
+        popover_box.show_all()
+        self.preview_options.pack_start(menu, False, False, 0)
+        self.preview_heading.pack_end(self.preview_options, False, False, 0)
+        self.preview_panel.pack_start(self.preview_heading, False, False, 0)
         self.video = Preview(self.video_status)
         self.video.rotation = preferences.load_rotation()
         overlay = Gtk.Overlay()
@@ -276,41 +279,79 @@ class Window(Gtk.Window):
         self.restore_button.set_margin_end(10)
         self.restore_button.set_no_show_all(True)
         overlay.add_overlay(self.restore_button)
-        self.preview_panel.pack_start(overlay, True, True, 0)
-        self.preview_options = Gtk.Box(spacing=8)
-        self.preview_options.pack_start(button('Picture only', lambda _: self.set_preview_only(True)), False, False, 0)
-        self.preview_options.pack_start(button('Fullscreen · F', lambda _: self.toggle_fullscreen()), False, False, 0)
-        top = Gtk.CheckButton(label='Keep above')
-        top.connect('toggled', lambda item: self.set_keep_above(item.get_active()))
-        self.preview_options.pack_end(top, False, False, 0)
-        self.preview_panel.pack_start(self.preview_options, False, False, 0)
-        self.record_bar = Gtk.Box(spacing=12)
-        self.record_bar.get_style_context().add_class('card')
-        self.record_button = button('●  Record', self.toggle_recording)
+        self.placeholder = Gtk.EventBox()
+        self.placeholder.get_style_context().add_class('placeholder')
+        empty = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
+        empty.set_halign(Gtk.Align.CENTER)
+        empty.set_valign(Gtk.Align.CENTER)
+        empty_icon = Gtk.Image.new_from_icon_name('camera-video-symbolic', Gtk.IconSize.DIALOG)
+        empty.pack_start(empty_icon, False, False, 0)
+        empty.pack_start(label('Camera preview', 'section'), False, False, 0)
+        empty.pack_start(label('Start the preview to see your Lyra.', 'muted'), False, False, 0)
+        self.empty_preview_button = button('Start preview', self.preview, primary=True)
+        empty.pack_start(self.empty_preview_button, False, False, 4)
+        self.placeholder.add(empty)
+        overlay.add_overlay(self.placeholder)
+        canvas = Gtk.Frame()
+        canvas.set_shadow_type(Gtk.ShadowType.NONE)
+        canvas.get_style_context().add_class('canvas-shell')
+        canvas.add(overlay)
+        self.preview_panel.pack_start(canvas, True, True, 0)
+        self.capture_strip = Gtk.Box(spacing=10)
+        self.capture_strip.get_style_context().add_class('capture-strip')
+        self.preview_panel.pack_start(self.capture_strip, False, False, 0)
+        body.pack_start(self.preview_panel, True, True, 0)
+        self.inspector_shell = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        self.inspector_shell.get_style_context().add_class('inspector')
+        self.inspector_shell.set_size_request(388, -1)
+        self.inspector_shell.set_hexpand(False)
+        self.sidebar = Gtk.Notebook()
+        self.sidebar.set_size_request(386, -1)
+        self.sidebar.set_hexpand(False)
+        self.sidebar.set_scrollable(True)
+        self.controls = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
+        self.add_tab(self.controls, 'Camera')
+        self.framing = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=16)
+        self.add_tab(self.framing, 'Framing')
+        self.record_options = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=16)
+        self.add_tab(self.record_options, 'Recording')
+        self.inspector_shell.pack_start(self.sidebar, True, True, 0)
+        body.pack_start(self.inspector_shell, False, False, 0)
+        self.record_bar = Gtk.Box(spacing=16)
+        self.record_bar.get_style_context().add_class('transport')
+        self.record_button = button('Record', self.toggle_recording)
+        self.record_button.set_image(Gtk.Image.new_from_icon_name('media-record-symbolic', Gtk.IconSize.BUTTON))
+        self.record_button.set_always_show_image(True)
         self.record_button.get_style_context().add_class('record')
         self.record_button.set_sensitive(False)
         self.record_bar.pack_start(self.record_button, False, False, 0)
-        self.record_state = label('Ready to record', 'record-status')
-        self.record_state.set_line_wrap(True)
-        self.record_bar.pack_start(self.record_state, True, True, 0)
-        self.record_timer = label('00:00', 'section')
-        self.record_bar.pack_end(self.record_timer, False, False, 0)
-        self.preview_panel.pack_start(self.record_bar, False, False, 0)
-        body.pack_start(self.preview_panel, True, True, 0)
-        self.sidebar = Gtk.Notebook()
-        self.sidebar.set_size_request(450, -1)
-        self.sidebar.set_scrollable(True)
-        self.controls = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=18)
-        self.add_tab(self.controls, 'Camera')
-        self.framing = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=18)
-        self.add_tab(self.framing, 'Framing')
-        self.record_options = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=18)
-        self.add_tab(self.record_options, 'Recording')
+        self.record_timer = label('00:00', 'record-timer')
+        self.record_timer.set_width_chars(5)
+        self.record_bar.pack_start(self.record_timer, False, False, 0)
+        context = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=3)
+        self.record_context = label('MP4 · Best quality', 'section')
+        context.pack_start(self.record_context, False, False, 0)
+        self.record_state = label('Select a microphone in Recording', 'record-status')
+        self.record_state.set_ellipsize(Pango.EllipsizeMode.END)
+        self.record_state.set_max_width_chars(48)
+        self.record_state.connect('notify::label', lambda item, _: item.set_tooltip_text(item.get_text()))
+        context.pack_start(self.record_state, False, False, 0)
+        self.record_details = context
+        self.record_bar.pack_start(context, True, True, 0)
+        self.record_folder_shortcut = icon_button('folder-open-symbolic', 'Open recordings folder', self.open_record_folder)
+        self.record_settings_shortcut = button('Recording settings', lambda _: self.show_recording_settings())
+        self.record_bar.pack_end(self.record_folder_shortcut, False, False, 0)
+        self.record_bar.pack_end(self.record_settings_shortcut, False, False, 0)
+        root.pack_start(self.record_bar, False, False, 0)
+        self.footer = Gtk.Box()
+        self.status = label('Connecting to camera…', 'status')
+        self.status.set_ellipsize(Pango.EllipsizeMode.END)
+        self.status.set_selectable(True)
+        self.status.connect('notify::label', self.status_changed)
+        self.footer.pack_start(self.status, True, True, 0)
+        root.pack_start(self.footer, False, False, 0)
         self.build_preview_options()
         self.build_record_options()
-        body.pack_start(self.sidebar, False, False, 0)
-        self.footer = label('Native camera controls · Processed preview, MP4 recording and virtual output', 'muted')
-        root.pack_start(self.footer, False, False, 0)
         self.record_tick = GLib.timeout_add(100, self.recording_tick)
         self.auto_poll_inflight = False
         self.auto_tick = GLib.timeout_add(1500, self.poll_auto)
@@ -319,11 +360,25 @@ class Window(Gtk.Window):
         self.refresh()
 
     def add_tab(self, content, title):
-        content.set_border_width(16)
+        content.set_border_width(14)
         scroll = Gtk.ScrolledWindow()
         scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
         scroll.add(content)
-        self.sidebar.append_page(scroll, label(title))
+        index = self.sidebar.append_page(scroll, label(title))
+        self.sidebar.child_set_property(scroll, 'tab-expand', True)
+        return index
+
+    def status_changed(self, widget, _param):
+        message = widget.get_text()
+        widget.set_tooltip_text(message)
+        context = widget.get_style_context()
+        problem = any(word in message.lower() for word in ('error', 'could not', 'blocked', 'interrupted', 'rejected'))
+        context.add_class('error') if problem else context.remove_class('error')
+
+    def show_recording_settings(self):
+        if self.preview_only:
+            self.set_preview_only(False)
+        self.sidebar.set_current_page(2)
 
     def submit(self, task, done, message, failed=None):
         if self.closed or self.busy:
@@ -332,6 +387,7 @@ class Window(Gtk.Window):
         self.controls.set_sensitive(False)
         self.refresh_button.set_sensitive(False)
         self.access_button.set_sensitive(False)
+        self.empty_preview_button.set_sensitive(False)
         self.status.set_text(message)
         future = self.pool.submit(task)
         def completed(future):
@@ -342,6 +398,7 @@ class Window(Gtk.Window):
                 self.controls.set_sensitive(True)
                 self.refresh_button.set_sensitive(True)
                 self.access_button.set_sensitive(True)
+                self.empty_preview_button.set_sensitive(True)
                 try:
                     value = future.result()
                 except PermissionError as error:
@@ -366,32 +423,49 @@ class Window(Gtk.Window):
         self.submit(camera.snapshot, self.loaded, 'Reading camera settings…')
 
     def loaded(self, data):
+        image_expanded = getattr(self, 'image_expander', None)
+        image_expanded = image_expanded.get_expanded() if image_expanded else False
+        exposure_expanded = getattr(self, 'exposure_expander', None)
+        exposure_expanded = exposure_expanded.get_expanded() if exposure_expanded else True
         for child in self.controls.get_children():
             child.destroy()
         self.rows = {}
-        self.device_label.set_text(f"Hollyland Lyra · Firmware {data['info'].get('swVer', '')}")
+        self.device_label.set_text(f"Hollyland Lyra · {data['info'].get('swVer', '')}")
         values = data['settings']
         zoom = SettingRow(self, 'zoom', values['zoom'], zoom=True)
         zoom.get_style_context().add_class('card')
+        zoom.get_style_context().add_class('zoom-panel')
         self.rows['zoom'] = zoom
         self.controls.pack_start(zoom, False, False, 0)
-        heading = section('Image & exposure', 'Reset to the original camera profile: Auto white balance, shutter and ISO. Zoom is unchanged.')
+        heading = Gtk.Box(spacing=8)
+        heading.pack_start(label('Image & exposure', 'section'), True, True, 0)
         self.reset_button = button('Reset to defaults', self.reset_image)
+        self.reset_button.get_style_context().add_class('flat')
         self.reset_button.set_tooltip_text('Restore the first verified Lyra settings, including Anti-flicker OFF and Auto modes. Zoom is unchanged.')
-        heading.pack_start(self.reset_button, False, False, 0)
+        heading.pack_end(self.reset_button, False, False, 0)
         self.controls.pack_start(heading, False, False, 0)
-        for group, names in [('Exposure', ('white-balance', 'shutter', 'iso', 'anti-flicker')),
-                             ('Image', ('brightness', 'contrast', 'saturation', 'sharpness', 'focus-mode'))]:
-            panel = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
-            panel.get_style_context().add_class('card')
-            panel.pack_start(label(group, 'section'), False, False, 0)
+        note = label('Auto applies instantly. Apply saves manual values.', 'muted')
+        note.set_line_wrap(True)
+        self.controls.pack_start(note, False, False, 0)
+        for group, names, expanded in [
+                ('Exposure & white balance', ('white-balance', 'shutter', 'iso', 'anti-flicker'), exposure_expanded),
+                ('Image adjustments', ('brightness', 'contrast', 'saturation', 'sharpness', 'focus-mode'), image_expanded)]:
+            expander = Gtk.Expander(label=group)
+            expander.set_expanded(expanded)
+            panel = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
+            panel.get_style_context().add_class('control-group')
             for index, name in enumerate(names):
                 if index:
                     panel.pack_start(Gtk.Separator(), False, False, 0)
                 row = SettingRow(self, name, values[name])
                 self.rows[name] = row
                 panel.pack_start(row, False, False, 0)
-            self.controls.pack_start(panel, False, False, 0)
+            expander.add(panel)
+            self.controls.pack_start(expander, False, False, 0)
+            if group.startswith('Exposure'):
+                self.exposure_expander = expander
+            else:
+                self.image_expander = expander
         self.controls.show_all()
         self.status.set_text('Connected. Camera settings are up to date.')
         if not self.auto_preview_started:
@@ -449,6 +523,15 @@ class Window(Gtk.Window):
     def video_status(self, text, playing):
         self.status.set_text(text)
         self.preview_button.set_label('Stop preview' if playing else 'Start preview')
+        preview_style = self.preview_button.get_style_context()
+        preview_style.remove_class('primary') if playing else preview_style.add_class('primary')
+        self.preview_button.set_image(Gtk.Image.new_from_icon_name(
+            'media-playback-stop-symbolic' if playing else 'media-playback-start-symbolic', Gtk.IconSize.BUTTON))
+        self.placeholder.set_visible(not playing)
+        self.preview_badge.set_text('LIVE' if playing else 'STOPPED')
+        badge_style = self.preview_badge.get_style_context()
+        badge_style.add_class('live') if playing else badge_style.remove_class('live')
+        self.update_capture_label()
         if not playing and self.video.recorder.active and not self.record_finalizing:
             self.stop_recording(reason=text)
         self.update_record_controls()
@@ -460,6 +543,12 @@ class Window(Gtk.Window):
             self.status.set_text(str(error))
             if not self.video.running:
                 self.preview_button.set_label('Start preview')
+                self.preview_button.get_style_context().add_class('primary')
+                self.placeholder.show()
+                self.preview_badge.set_text('STOPPED')
+                self.preview_badge.get_style_context().remove_class('live')
+                if hasattr(self, 'mic_choice'):
+                    self.update_record_controls()
 
     def choice(self, names, callback):
         combo = Gtk.ComboBoxText()
@@ -473,83 +562,102 @@ class Window(Gtk.Window):
         box = section(title, hint)
         box.pack_start(control, False, False, 0)
         parent.pack_start(box, False, False, 0)
+        control.get_accessible().set_name(title)
 
     def build_preview_options(self):
-        self.framing.pack_start(section('Framing & appearance', 'These changes affect the preview, recording and virtual output.'), False, False, 0)
         self.mode_choice = self.choice([(name, name) for name in MODES], self.change_mode)
         saved_mode = preferences.load_option('capture_mode', '4K · 30 fps')
         self.mode_choice.set_active_id(saved_mode if saved_mode in MODES else '4K · 30 fps')
-        self.field(self.framing, 'Capture quality', self.mode_choice)
+        self.mode_choice.get_accessible().set_name('Capture quality')
+        self.mode_choice.set_tooltip_text('Native capture quality used by preview and recordings')
+        self.mode_choice.set_size_request(190, -1)
+        self.mode_choice.set_hexpand(False)
+        self.capture_strip.pack_start(label('Capture', 'muted'), False, False, 0)
+        self.capture_strip.pack_start(self.mode_choice, False, False, 0)
+        portrait = button('Portrait / Reels', self.portrait)
+        portrait.set_tooltip_text('Rotate a vertically mounted camera without cropping')
+        self.capture_strip.pack_start(portrait, False, False, 0)
+        self.mirror_check = Gtk.CheckButton(label='Mirror')
+        self.mirror_check.get_accessible().set_name('Mirror camera horizontally')
+        self.mirror_check.connect('toggled', lambda item: self.video_action(lambda: self.video.set_mirror(item.get_active())))
+        self.capture_strip.pack_end(self.mirror_check, False, False, 0)
+        self.framing.pack_start(section('Composition', 'These changes appear in the preview and recordings.'), False, False, 0)
         self.rotation_choice = self.choice([('0', 'Original · 0°'), ('90', '90° clockwise'),
             ('270', '90° counterclockwise'), ('180', '180°')], self.change_rotation)
         self.rotation_choice.set_active_id(str(self.video.rotation))
         self.field(self.framing, 'Orientation', self.rotation_choice)
-        self.framing.pack_start(button('Portrait / Reels · Full frame', self.portrait), False, False, 0)
         self.shape_choice = self.choice(list(SHAPES.items()), lambda item: self.video.set_shape(item.get_active_id()))
-        self.field(self.framing, 'Frame shape', self.shape_choice, 'Portrait crop trims a landscape image. Rotate a physically upright camera to keep the full frame.')
+        self.field(self.framing, 'Frame shape', self.shape_choice,
+            'Portrait crop trims the image. Use Portrait / Reels for a vertically mounted camera.')
+        self.framing.pack_start(Gtk.Separator(), False, False, 0)
         self.effect_choice = self.choice([(item.id, item.label) for item in effects.ALL],
             lambda item: self.video.set_effect(item.get_active_id()))
-        self.field(self.framing, 'Effect', self.effect_choice)
-        self.mirror_check = Gtk.CheckButton(label='Mirror horizontally')
-        self.mirror_check.connect('toggled', lambda item: self.video_action(lambda: self.video.set_mirror(item.get_active())))
-        self.framing.pack_start(self.mirror_check, False, False, 0)
+        self.field(self.framing, 'Look', self.effect_choice)
         self.software_zoom = Gtk.Scale.new_with_range(Gtk.Orientation.HORIZONTAL, 0.25, 4, 0.25)
         self.software_zoom.set_value(1)
         self.software_zoom.set_digits(2)
         self.software_zoom.connect('value-changed', lambda item: self.video_action(lambda: self.video.set_software_zoom(item.get_value())))
-        self.field(self.framing, 'Software zoom', self.software_zoom, '1× keeps the full processed image. Below 1× adds a black border.')
+        self.field(self.framing, 'Framing zoom', self.software_zoom,
+            'Below 1× adds a black border. Camera zoom is in Camera.')
 
     def build_record_options(self):
-        self.record_options.pack_start(section('Recording', 'MP4 · H.264 video + AAC audio. Start and stop with the button below the preview.'), False, False, 0)
+        self.record_options.pack_start(section('Recording setup', 'MP4 video with your selected microphone.'), False, False, 0)
         self.record_quality = self.choice([(key, value[0]) for key, value in recording.QUALITY_PROFILES.items()], self.change_record_quality)
         saved_quality = preferences.load_option('record_quality', 'best')
         self.record_quality.set_active_id(saved_quality if saved_quality in recording.QUALITY_PROFILES else 'best')
-        self.field(self.record_options, 'Recording quality', self.record_quality,
-            'Best quality keeps more detail. Lossless preserves processed pixels and creates very large files.')
+        self.field(self.record_options, 'Video quality', self.record_quality)
+        self.record_quality.set_tooltip_text('Lossless preserves processed pixels and creates much larger files.')
         self.capture_label = label('', 'muted')
         self.capture_label.set_line_wrap(True)
         self.record_options.pack_start(self.capture_label, False, False, 0)
         self.update_capture_label()
+        self.record_options.pack_start(Gtk.Separator(), False, False, 0)
         audio_row = Gtk.Box(spacing=8)
         self.mic_choice = Gtk.ComboBoxText()
         self.mic_choice.set_hexpand(True)
+        self.mic_choice.get_accessible().set_name('Recording microphone')
         self.mic_choice.append('none', 'No audio · Video only')
         self.mic_choice.append('default', 'System default microphone')
         self.mic_choice.set_active_id('default')
         self.mic_choice.connect('changed', self.microphone_changed)
         audio_row.pack_start(self.mic_choice, True, True, 0)
-        self.mic_refresh = Gtk.Button.new_from_icon_name('view-refresh-symbolic', Gtk.IconSize.BUTTON)
-        self.mic_refresh.connect('clicked', self.refresh_microphones)
-        self.mic_refresh.get_accessible().set_name('Refresh microphone list')
-        self.mic_refresh.set_tooltip_text('Refresh microphone list')
+        self.mic_refresh = icon_button('view-refresh-symbolic', 'Refresh microphone list', self.refresh_microphones)
         audio_row.pack_start(self.mic_refresh, False, False, 0)
         self.field(self.record_options, 'Microphone', audio_row)
-        self.mic_hint = label('Loading microphone devices…', 'muted')
+        self.mic_hint = label('Finding microphones…', 'muted')
         self.mic_hint.set_line_wrap(True)
         self.record_options.pack_start(self.mic_hint, False, False, 0)
         self.audio_meter = Gtk.ProgressBar()
         self.audio_meter.set_show_text(True)
-        self.audio_meter.set_text('Audio level · shown while recording')
+        self.audio_meter.set_text('Input level · active while recording')
         self.record_options.pack_start(self.audio_meter, False, False, 0)
-        self.folder_label = label(str(self.record_folder), 'muted')
-        self.folder_label.set_line_wrap(True)
-        self.folder_label.set_selectable(True)
-        self.record_options.pack_start(section('Save recordings to'), False, False, 0)
-        self.record_options.pack_start(self.folder_label, False, False, 0)
-        self.folder_button = button('Choose folder…', self.choose_folder)
-        self.record_options.pack_start(self.folder_button, False, False, 0)
-        self.open_folder_button = button('Open recordings folder', self.open_record_folder)
-        self.record_options.pack_start(self.open_folder_button, False, False, 0)
         self.record_options.pack_start(Gtk.Separator(), False, False, 0)
-        self.record_options.pack_start(section('Virtual camera output', 'Choose Lyra Control in VLC or OBS. This output carries video only.'), False, False, 0)
+        destination = section('Save location')
+        self.folder_label = label(str(self.record_folder), 'muted')
+        self.folder_label.set_ellipsize(Pango.EllipsizeMode.MIDDLE)
+        self.folder_label.set_max_width_chars(36)
+        self.folder_label.set_selectable(True)
+        self.folder_label.set_tooltip_text(str(self.record_folder))
+        destination.pack_start(self.folder_label, False, False, 0)
+        folder_actions = Gtk.Box(spacing=8)
+        self.folder_button = button('Choose folder…', self.choose_folder)
+        self.open_folder_button = button('Open folder', self.open_record_folder)
+        folder_actions.pack_start(self.folder_button, True, True, 0)
+        folder_actions.pack_start(self.open_folder_button, True, True, 0)
+        destination.pack_start(folder_actions, False, False, 4)
+        self.record_options.pack_start(destination, False, False, 0)
+        self.virtual_expander = Gtk.Expander(label='Virtual camera output')
+        output_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
         self.output_button = button('Enable virtual camera', self.toggle_output)
         self.vlc_button = button('Open output in VLC', self.open_vlc)
         self.vlc_button.set_sensitive(False)
-        self.record_options.pack_start(self.output_button, False, False, 0)
-        self.record_options.pack_start(self.vlc_button, False, False, 0)
-        self.output_label = label('Close other apps using this output before changing its size or orientation.', 'muted')
+        output_box.pack_start(self.output_button, False, False, 0)
+        output_box.pack_start(self.vlc_button, False, False, 0)
+        self.output_label = label('Choose Lyra Control in VLC / OBS. Video only.', 'muted')
         self.output_label.set_line_wrap(True)
-        self.record_options.pack_start(self.output_label, False, False, 0)
+        output_box.pack_start(self.output_label, False, False, 0)
+        self.virtual_expander.add(output_box)
+        self.record_options.pack_start(self.virtual_expander, False, False, 0)
 
     def refresh_microphones(self, *_):
         if self.video.recorder.active or self.record_finalizing:
@@ -577,7 +685,7 @@ class Window(Gtk.Window):
                 valid = {'none', 'default'} | {mic.name for mic in self.mics}
                 self.mic_choice.set_active_id(saved if saved in valid else 'default')
                 self.mic_choice.handler_unblock_by_func(self.microphone_changed)
-                self.mic_hint.set_text(f'{len(self.mics)} microphones found. Audio is captured only while recording.')
+                self.mic_hint.set_text(f'{len(self.mics)} inputs available · Captured only while recording')
                 self.update_record_controls()
                 return False
             GLib.idle_add(update)
@@ -585,10 +693,20 @@ class Window(Gtk.Window):
 
     def change_record_quality(self, item):
         preferences.save_option('record_quality', item.get_active_id())
+        self.update_capture_label()
 
     def update_capture_label(self):
+        mode = self.mode_choice.get_active_text() if hasattr(self, 'mode_choice') else '4K · 30 fps'
+        if hasattr(self, 'format_chip'):
+            self.format_chip.set_text(mode)
         if hasattr(self, 'capture_label'):
-            self.capture_label.set_text(f'Source: {self.mode_choice.get_active_text()}. Set capture quality in Framing; recordings are never upscaled.')
+            details = f'Native capture · {mode}'
+            if self.video.last_caps:
+                info = GstVideo.VideoInfo.new_from_caps(self.video.last_caps)
+                details += f' · {info.width} × {info.height}'
+            self.capture_label.set_text(details)
+        if hasattr(self, 'record_quality') and hasattr(self, 'record_context'):
+            self.record_context.set_text('MP4 · '+str(self.record_quality.get_active_text() or 'Best quality'))
 
     def poll_auto(self):
         if self.closed:
@@ -639,6 +757,7 @@ class Window(Gtk.Window):
             self.record_folder = Path(dialog.get_filename())
             preferences.save_option('record_folder', str(self.record_folder))
             self.folder_label.set_text(str(self.record_folder))
+            self.folder_label.set_tooltip_text(str(self.record_folder))
         dialog.destroy()
 
     def open_record_folder(self, *_):
@@ -707,11 +826,15 @@ class Window(Gtk.Window):
 
     def update_record_controls(self):
         active = self.video.recorder.active or self.record_finalizing
+        self.record_bar.set_visible(not self.preview_only or active)
         context = self.record_state.get_style_context()
         context.add_class('recording') if active else context.remove_class('recording')
-        self.record_button.set_label('■  Stop recording' if active else '●  Record')
+        self.record_button.set_label('Stop recording' if active else 'Record')
+        self.record_button.set_image(Gtk.Image.new_from_icon_name(
+            'media-playback-stop-symbolic' if active else 'media-record-symbolic', Gtk.IconSize.BUTTON))
         self.record_button.set_sensitive(not self.record_finalizing and (active or (self.video.running and self.video.last_caps is not None)))
         self.framing.set_sensitive(not active)
+        self.capture_strip.set_sensitive(not active)
         for widget in (self.mic_choice, self.mic_refresh, self.folder_button, self.output_button, self.preview_button, self.record_quality):
             widget.set_sensitive(not active)
         if not active and not self.last_recording:
@@ -736,6 +859,7 @@ class Window(Gtk.Window):
         degrees = int(item.get_active_id())
         self.video.set_rotation(degrees)
         preferences.save_rotation(degrees)
+        self.update_capture_label()
 
     def portrait(self, *_):
         self.shape_choice.set_active_id('rectangle')
@@ -797,9 +921,12 @@ class Window(Gtk.Window):
         if enabled and not self.preview_only:
             self.previous_size = self.get_size()
         self.preview_only = enabled
-        for widget in (self.sidebar, self.header, self.status, self.footer, self.preview_options):
+        for widget in (self.sidebar, self.inspector_shell, self.header, self.status,
+                       self.footer, self.preview_options, self.preview_heading, self.capture_strip):
             widget.set_visible(not enabled)
         self.restore_button.set_visible(enabled)
+        for widget in (self.record_details, self.record_folder_shortcut, self.record_settings_shortcut):
+            widget.set_visible(not enabled)
         self.record_bar.set_visible(not enabled or self.video.recorder.active or self.record_finalizing)
         self.set_decorated(not enabled)
         if enabled:
@@ -807,7 +934,7 @@ class Window(Gtk.Window):
             self.video.set_size_request(180, 120)
             self.resize(640, 400)
         else:
-            self.set_size_request(1040, 660)
+            self.set_size_request(980, 640)
             self.video.set_size_request(400, 280)
             self.resize(*getattr(self, 'previous_size', (1280, 820)))
 

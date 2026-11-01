@@ -22,12 +22,12 @@ Install or update the per-user launcher and desktop entry:
 
 ## Workspace
 
-The English, left-to-right interface keeps a large preview beside three settings tabs. The Record/Stop button and elapsed time stay below the preview.
+The English, left-to-right studio layout puts a large monitor beside a compact inspector. Capture quality, Portrait / Reels and Mirror stay directly below the monitor. Record/Stop, elapsed time, microphone, quality and folder access live in a full-width bottom transport, regardless of the selected settings tab.
 
 | Tab | Controls |
 | --- | --- |
 | **Camera** | Camera zoom, white balance, shutter, ISO, anti-flicker, brightness, contrast, saturation, sharpness and device-reported focus mode |
-| **Framing** | Capture quality, orientation, full-frame portrait, frame shape, effects, mirror and software zoom |
+| **Framing** | Orientation, frame shape, effects and software zoom; capture quality, Portrait / Reels and Mirror are in the strip below the monitor |
 | **Recording** | Microphone picker, input level while recording, destination folder and virtual-camera output |
 
 Manual camera values use **Apply** and are independently read back. **Auto applies immediately when toggled**, with no extra Apply click. Auto values are periodically refreshed from the device. Read-only controls are disabled; **Refresh camera** reads all settings again.
@@ -51,13 +51,13 @@ If you deliberately select 50/60 Hz anti-flicker, the camera can restrict shutte
 
 ### Portrait / Reels
 
-Mount the camera vertically, then choose **Framing → Portrait / Reels · Full frame**. This rotates the entire image into portrait orientation without cutting a narrow strip from a landscape frame. Choose **90° counterclockwise** if the camera is mounted the other way. Orientation is remembered between launches.
+Mount the camera vertically, then click **Portrait / Reels** below the monitor. This rotates the entire image into portrait orientation without cutting a narrow strip from a landscape frame. Choose **90° counterclockwise** if the camera is mounted the other way. Orientation is remembered between launches.
 
 **Portrait crop · 9:16** is a separate centered crop. Rotation happens before crop; horizontal mirror happens afterward. Camera zoom is the device's **1–4× digital zoom**. Software zoom affects the processed image; values below 1× add a black border.
 
 ### Record video and audio
 
-1. Start the preview and set capture quality, orientation and appearance in **Framing**. New workspaces default to native **4K · 30 fps**, and your capture choice is remembered.
+1. Start the preview and choose native capture quality in the strip below the monitor. Use **Framing** for orientation and appearance. New workspaces default to native **4K · 30 fps**, and your capture choice is remembered.
 2. In **Recording**, choose **Best quality** (the default), **Smaller files**, or **Lossless · very large files**, then select your microphone, **System default microphone**, or **No audio · Video only**. Refresh the microphone list after connecting a device. Speaker-monitor sources are excluded.
 3. Optionally choose a destination folder. The default is **`~/Videos/Lyra Control`**.
 4. Click **Record** below the preview. The elapsed timer and microphone level show capture activity.
@@ -71,7 +71,7 @@ Framing, microphone selection and preview stop are locked during a recording. Na
 
 ### Virtual camera for VLC, OBS and other apps
 
-In **Recording**, click **Enable virtual camera**, then **Open output in VLC**, or select **Lyra Control** in another app. The device path is shown in the interface; it is currently `/dev/video42` on this computer but is discovered by identity rather than assumed.
+In **Recording**, expand **Virtual camera output**, click **Enable virtual camera**, then **Open output in VLC**, or select **Lyra Control** in another app. The device path is shown in the interface; it is currently `/dev/video42` on this computer but is discovered by identity rather than assumed.
 
 Keep the preview running. Close the virtual-camera consumer before changing quality, orientation or frame dimensions, then reopen it afterward. Virtual output and MP4 recording can run together. Virtual output carries **video only**; choose the required microphone separately in the consuming app. Opening the physical Lyra directly bypasses the application's processing.
 
@@ -79,7 +79,11 @@ The first setup after a reboot may request system authorization to create a temp
 
 ### Window controls
 
-**Picture only** hides the settings; **Show controls** or **Esc** restores them. An active recording keeps its Stop control visible. **F / F11** toggles fullscreen; F does not intercept typing in numeric fields. **Keep above** depends on the window manager.
+The eye icon above the monitor opens **Picture only**; **Show controls** or **Esc** restores the workspace. An active recording retains a compact Stop control and timer. The fullscreen icon or **F / F11** toggles fullscreen; F does not intercept typing in numeric fields. **Window options** (the three-dot button) contains **Keep window above others**, which depends on the window manager.
+
+Exposure starts expanded; **Image adjustments** opens the less frequently used image controls. Your disclosure choices survive camera refresh. Compact status messages retain their complete text in a tooltip and can be selected/copied. A green **LIVE** badge appears only after preview frames arrive.
+
+The studio layout uses IBM Plex Sans/Mono when installed, with DejaVu fallbacks, charcoal surfaces and an amber accent. All native GTK colors are centralized in `ui_theme.py`. Research, layout decisions and palette details are recorded in [DESIGN_NOTES.md](DESIGN_NOTES.md).
 
 ## Requirements
 
@@ -104,7 +108,9 @@ If HID access is denied, click **Allow camera access**. The helper identifies th
 
 ```text
 lyra-control/
-├── app.py                    English GTK workspace
+├── app.py                    English GTK studio workspace
+├── ui_theme.py               Native theme tokens and styles
+├── DESIGN_NOTES.md           Design research and layout rationale
 ├── video_preview.py          Processed video and bounded frame delivery
 ├── recording.py              MP4 encoder and microphone discovery
 ├── virtual_camera.py         Processed video output to other apps
@@ -140,6 +146,8 @@ GDK_BACKEND=x11 python3 tests/gui_smoke.py
 GDK_BACKEND=x11 python3 tests/vlc_integration.py
 python3 tests/recording_integration.py
 python3 tests/auto_reset_integration.py
+GDK_BACKEND=x11 python3 tests/ui_layout.py
+GDK_BACKEND=x11 python3 tests/ui_contrast.py
 ```
 
 The recording integration test briefly captures the camera and each microphone into a temporary folder, checks streams/timing, and deletes the test media. Other video checks save only metadata; GUI screenshots are taken with the preview stopped. Native-control live checks restore the original values. Local validation metadata is under `artifacts/`.

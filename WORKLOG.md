@@ -1,5 +1,13 @@
 # Implementation contract
 
+## Researched studio GUI redesign — 2026-11-01
+
+- Outcome: a clearer native English camera workspace, informed by camera-software and GNOME interaction research.
+- Acceptance: large preview, bounded inspector, always-visible capture shortcuts and recording transport; fewer repeated hints/oversized control groups; readable focus/contrast across system themes and compact sizes.
+- Invariants: retain verified HID/Auto/reset, native-resolution recording, microphone selection and virtual output; capture settings locked while recording; no permanent native-setting changes or saved test footage.
+- Scope/order: inspect Camera Hub/OBS/GNOME and local design catalog → define studio tokens/layout → native widgets and state feedback → rendered/interaction/recording checks → README/design notes.
+- Evidence: real GTK captures at1360x840,1040x660,980x640; popup/theme contrast; input/feedback/disclosure tests; existing live camera and A/V integration checks.
+
 ## Original defaults, immediate Auto and MP4 quality repair — 2026-11-01
 
 - Outcome: restore first-setup image values now; fix Reset and Auto; record native high-resolution detail without degrading frame delivery.
@@ -108,3 +116,15 @@ Remaining optional work: embedded video preview, autofocus/AI/audio controls, re
 - Live Auto UI test verified Manual↔Auto for WB/shutter/ISO without Apply, then recovered the original profile after manual WB6000/ISO1600 and60Hz changes. Existing GUI zoom/effects/shape/lifecycle, independent virtual consumer and VLC portrait decoding passed. Updated saved capture to4K30 and quality toBest for handoff; test scripts preserve user preferences.
 - 162 pytest regressions passed, plus Ruff F/E9 and compilation. Updated English README and inspected all three English tabs at1280x820 and1040x660 with camera images excluded from screenshots.
 - Evidence: artifacts/default-field-repro.json, restored-first-setup.json, auto-reset-repair.json,4k-stage-rate.json,4k-recording-repair.json and recording-validation.json. Live clips were temporary and deleted. Regression entry points include tests/test_auto_ui.py, test_capture_defaults_ui.py, test_recording_quality.py, tests/auto_reset_integration.py and tests/recording_integration.py.
+
+## Studio redesign delivered — 2026-11-01
+
+- Researched primary Camera Hub/OBS documentation and GNOME HIG; consulted the local design-ui-ux catalog. Selected a focused native studio rather than a generic web/dock layout. References and tradeoffs are in DESIGN_NOTES.md.
+- Added ui_theme.py with named charcoal/amber/red/green GTK tokens and installed IBM Plex Sans/Mono with DejaVu fallbacks. No remote assets, framework migration or camera/encoding changes.
+- Replaced the controls-wall layout with a920px preview at1360px window width, a388px bounded inspector, visible capture/portrait/mirror strip, compact disclosures and full-width recording transport. Fixed inherited expansion that had left unused space between panes. At980px width the drawing area remains540px wide.
+- Secondary hints are concentrated by task rather than repeated per row. Image and virtual-camera controls use disclosure; refresh preserves disclosure state. Manual Apply is disabled while Auto is enabled; Auto's immediate verified write path is unchanged.
+- Added true stopped/live feedback and a stopped-preview action, compact full-message status/tooltips, symbolic accessible controls, contextual primary preview action and folder/record-settings shortcuts. Picture-only mode keeps only Stop/timer when recording, and failure cannot leave a stale LIVE badge.
+- Rendered all three tabs, image disclosure,1040x660 and980x640 layouts using actual device settings with preview stopped. Inspected screenshots. Tested21 dropdown/theme combinations; minimum popup contrast5.92:1. Text/button palette pairs are at least4.92:1, including Record hover.
+- Camera was initially disconnected; user reconnected it. Re-granted temporary ACL to the identity/descriptor-verified Lyra hidraw node, then completed live GUI zoom apply/restore, shapes/filters/permission/fullscreen tests. Native recording passed both physical microphones, video-only, virtual output and close/finalization; temporary clips were deleted and user capture/quality preferences restored.
+-167 pytest regressions passed, including five new studio interaction regressions. Ruff F/E9 and compilation passed. Existing GLib deprecation and repeated-application-name test warnings are unchanged behavior and do not affect execution.
+- Evidence: artifacts/studio-*.png, studio-layout.json, studio-contrast.json, studio-popup-contrast.json and recording-validation.json. Native camera settings and user media preferences were preserved. Updated README navigation and added opt-in tests/ui_layout.py and tests/ui_contrast.py.
