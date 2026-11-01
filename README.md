@@ -102,7 +102,11 @@ sudo apt install python3-gi python3-gi-cairo gir1.2-gtk-3.0 \
 
 GTK/Cairo rendering works on native Wayland and X11; no external camview process, XWayland or `gtksink` is required.
 
+Preview presentation follows GTK's monitor frame clock, including 60 fps capture. A bounded three-sample display buffer absorbs USB scheduling jitter (up to two frames of buffering); recording continues on its independent native-resolution branch. The application prefers GTK3's GL compositor to avoid a measured half-rate shared-memory presentation path on this system. Existing `GDK_GL` overrides are respected; GDK keeps its Cairo fallback if a GL context is unavailable. Actual preview FPS depends on monitor refresh rate, visibility and system load.
+
 If HID access is denied, click **Allow camera access**. The helper identifies the Lyra by USB identity and report descriptor, then grants temporary access without storing credentials. Permission may need to be granted again after reconnecting. If the physical camera is busy, close its direct capture in other apps and restart the preview.
+
+The **Camera** tab shows connection/access errors with **Allow camera access** or **Retry connection**, instead of an empty settings area. Once the device is read successfully, zoom, exposure and image controls replace that message.
 
 ## Project layout
 
@@ -148,6 +152,8 @@ python3 tests/recording_integration.py
 python3 tests/auto_reset_integration.py
 GDK_BACKEND=x11 python3 tests/ui_layout.py
 GDK_BACKEND=x11 python3 tests/ui_contrast.py
+GDK_BACKEND=wayland python3 tests/preview_performance.py
+GDK_BACKEND=x11 python3 tests/preview_performance.py --synthetic
 ```
 
 The recording integration test briefly captures the camera and each microphone into a temporary folder, checks streams/timing, and deletes the test media. Other video checks save only metadata; GUI screenshots are taken with the preview stopped. Native-control live checks restore the original values. Local validation metadata is under `artifacts/`.

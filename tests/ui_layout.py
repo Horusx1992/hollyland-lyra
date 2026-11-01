@@ -18,7 +18,8 @@ root = app.ROOT/'artifacts'
 root.mkdir(exist_ok=True)
 cases = [('studio-camera', 0, 1360, 840), ('studio-image', 0, 1360, 840),
          ('studio-framing', 1, 1360, 840), ('studio-recording', 2, 1360, 840),
-         ('studio-compact', 2, 1040, 660), ('studio-small', 0, 980, 640)]
+         ('studio-compact', 2, 1040, 660), ('studio-small', 0, 980, 640),
+         ('studio-access', 0, 980, 640)]
 index = 0
 errors = []
 records = []
@@ -26,6 +27,8 @@ records = []
 
 def begin():
     name, page, width, height = cases[index]
+    if name == 'studio-access':
+        window.camera_unavailable(PermissionError('simulated denied access'))
     window.sidebar.set_current_page(page)
     window.image_expander.set_expanded(name == 'studio-image')
     if name == 'studio-image':

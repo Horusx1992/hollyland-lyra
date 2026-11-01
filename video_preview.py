@@ -6,9 +6,11 @@ display branch scales before RGB conversion so GUI painting never maps full
 """
 import math
 import threading
+from collections import deque
 
 import gi
 gi.require_version('Gtk', '3.0')
+gi.require_version('Gdk', '3.0')
 gi.require_version('Gst', '1.0')
 gi.require_version('GstVideo', '1.0')
 gi.require_version('PangoCairo', '1.0')
@@ -52,10 +54,14 @@ class Preview(Gtk.DrawingArea):
         self.frames_received = 0
         self.frames_drawn = 0
         self.recorder = Recorder()
-        self.last_caps = self.latest_sample = None
+        self.last_caps = None
+        # Up to two frames of display jitter tolerance, bounded even while hidden.
+        # A single latest-only slot loses a frame whenever USB/GTK phases cross.
+        self.display_samples = deque(maxlen=3)
         self.sample_lock = threading.Lock()
         self.message = 'Start the preview to see your camera here'
         self.timer = 0
+        self.frame_tick = 0
         self.connect('draw', self.draw_frame)
         self.connect('size-allocate', lambda *_: self.update_display_size())
         self.connect('destroy', lambda *_: self.stop())
@@ -115,13 +121,20 @@ class Preview(Gtk.DrawingArea):
             self.message = 'Opening camera…'
             if self.pipeline.set_state(Gst.State.PLAYING) == Gst.StateChangeReturn.FAILURE:
                 raise RuntimeError('Could not start video. Close other apps using the physical camera.')
-            self.timer = GLib.timeout_add(33, self.pull_frame)
+            # Present a buffered sample just before GTK paints a monitor frame.
+            # A 33ms polling timer caps a 60fps camera at 30fps and drifts against
+            # the compositor. Keep bus handling independent when minimized.
+            self.frame_tick = self.add_tick_callback(self.present_frame)
+            self.timer = GLib.timeout_add(100, self.check_stream)
             self.queue_draw()
         except Exception:
             self.stop()
             raise
 
     def stop(self):
+        if self.frame_tick:
+            self.remove_tick_callback(self.frame_tick)
+            self.frame_tick = 0
         if self.timer:
             GLib.source_remove(self.timer)
             self.timer = 0
@@ -130,7 +143,8 @@ class Preview(Gtk.DrawingArea):
         self.pipeline = self.sink = self.frame = None
         self.display_filter = self.display_size = None
         with self.sample_lock:
-            self.latest_sample = self.last_caps = None
+            self.display_samples.clear()
+            self.last_caps = None
         self.message = 'Preview stopped'
         self.queue_draw()
 
@@ -151,7 +165,7 @@ class Preview(Gtk.DrawingArea):
         if sample is None:
             return Gst.FlowReturn.EOS
         with self.sample_lock:
-            self.latest_sample = sample
+            self.display_samples.append(sample)
         return Gst.FlowReturn.OK
 
     def add_display_branch(self):
@@ -201,7 +215,7 @@ class Preview(Gtk.DrawingArea):
         if self.recorder.active:
             raise RuntimeError('Stop recording before changing video settings.')
 
-    def pull_frame(self):
+    def check_stream(self):
         if self.pipeline is None:
             return False
         bus = self.pipeline.get_bus()
@@ -218,9 +232,17 @@ class Preview(Gtk.DrawingArea):
             self.message = text
             self.on_status(text, False)
             return False
+        return True
+
+    def present_frame(self, _widget, _clock):
+        return self.pull_frame()
+
+    def pull_frame(self):
+        if self.pipeline is None:
+            return False
         with self.sample_lock:
-            sample = self.latest_sample
-            self.latest_sample = None
+            ready = self.frame is not None or len(self.display_samples) >= 2
+            sample = self.display_samples.popleft() if ready and self.display_samples else None
         if sample is not None:
             info = GstVideo.VideoInfo.new_from_caps(sample.get_caps())
             buffer = sample.get_buffer()

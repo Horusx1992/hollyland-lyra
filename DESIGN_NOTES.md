@@ -39,3 +39,9 @@ Compared a simple preferences window, an OBS-like dock system and a focused came
 Rendered Camera, expanded Image, Framing and Recording at 1360 × 840; Recording at 1040 × 660; Camera at 980 × 640. Screenshots have the camera preview stopped. Also checked disabled, loading, connection error and live/recording transitions.
 
 Interaction regressions cover capture controls outside the inspector, saved disclosure states, recording locks, compact error recovery and stale LIVE feedback. Existing native Auto/reset, codec, timing and lifecycle tests remain applicable. Live tests exercise the camera and selected microphones, remove temporary media and restore native test changes.
+
+## Preview and connection recovery follow-up
+
+The Camera inspector now owns its loading/error message and access/retry actions. Denied HID access after USB reconnection previously left an empty Camera page; successful reads now replace the recovery message with the real controls. Previously loaded values stay disabled while access is blocked.
+
+The preview uses [GTK's frame-clock callback](https://docs.gtk.org/gtk3/method.Widget.add_tick_callback.html) rather than a fixed33ms poll. Measurements also isolated a half-rate Wayland shared-memory presentation path; this application prefers GTK3's GL compositor while preserving explicit environment overrides and GDK's existing context-failure fallback ([GTK3 source](https://github.com/GNOME/gtk/blob/gtk-3-24/gdk/gdkwindow.c)). A bounded three-sample display queue smooths USB/paint scheduling bursts, with up to two frames of buffering. The full-resolution recorder and virtual output remain independent.

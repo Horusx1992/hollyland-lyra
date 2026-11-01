@@ -1,5 +1,13 @@
 # Implementation contract
 
+## Preview cadence and missing Camera controls — 2026-11-01
+
+- Outcome: smooth 1080p60 preview and visible/recoverable camera-control state.
+- Acceptance: remove the approximately30fps display ceiling; show settings after access restoration and actionable access/retry state on failure.
+- Invariants: native-resolution MP4/virtual output and camera values remain unchanged; bounded rendering, release callbacks on stop, preserve user preferences and delete temporary media.
+- Scope/order: reproduce synthetic/physical cadence and denied HID access → frame-clock rendering/GL/bounded jitter buffer → Camera-tab recovery → live A/V, GTK and regression verification.
+- Evidence: opt-in tests/preview_performance.py stores metadata only; tests cover USB bursts, bounded hidden buffering, actual asynchronous permission failure/retry and original controls.
+
 ## Researched studio GUI redesign — 2026-11-01
 
 - Outcome: a clearer native English camera workspace, informed by camera-software and GNOME interaction research.
@@ -128,3 +136,12 @@ Remaining optional work: embedded video preview, autofocus/AI/audio controls, re
 - Camera was initially disconnected; user reconnected it. Re-granted temporary ACL to the identity/descriptor-verified Lyra hidraw node, then completed live GUI zoom apply/restore, shapes/filters/permission/fullscreen tests. Native recording passed both physical microphones, video-only, virtual output and close/finalization; temporary clips were deleted and user capture/quality preferences restored.
 -167 pytest regressions passed, including five new studio interaction regressions. Ruff F/E9 and compilation passed. Existing GLib deprecation and repeated-application-name test warnings are unchanged behavior and do not affect execution.
 - Evidence: artifacts/studio-*.png, studio-layout.json, studio-contrast.json, studio-popup-contrast.json and recording-validation.json. Native camera settings and user media preferences were preserved. Updated README navigation and added opt-in tests/ui_layout.py and tests/ui_contrast.py.
+
+## Preview cadence and Camera recovery delivered — 2026-11-01
+
+- Reproduced 1080p60 synthetic capture at59.86fps with preview29.93fps. Physical capture showed the same approximately30fps limit. The fixed33ms GUI timer was one cause; frame-clock timing alone still exposed a separate half-rate GTK3 Wayland shared-memory path. Enabling GDK's GL compositor resolved that path; environment overrides are preserved, and GTK's context-failure fallback remains available.
+- Latest-only display buffering also discarded burst-delivered frames when USB and paint phases crossed. Replaced it with an explicitly bounded three-sample FIFO, initially waiting for two samples. This adds up to two frames of display buffering; native recording/output remain independent. GTK's frame clock handles presentation; a separate100ms bus watch still detects EOS/errors while the window is hidden. Both callbacks and retained samples are released on stop.
+- Physical Wayland preview measured59.65fps after the changes; subsequent short measurements with the full workspace measured53.53fps. These are local short-run measurements, not a sustained60fps guarantee. Native input and display conversion remained approximately60fps. Metadata only in artifacts/preview-pacing-GdkWaylandDisplay-Lyra.json and workspace-preview-pacing.json; no camera images retained.
+- Missing Camera controls reproduced as PermissionError on the reconnected identity/descriptor-verified Lyra HID interface. Restored temporary access using the existing helper. Camera now contains explicit loading/access/retry states; verified successful reads replace them with all ten native rows. Stale rows remain disabled on failure. Actual asynchronous denied-refresh/retry callbacks are covered, not only a mock layout.
+- Full regression suite172 passed; after adding a hidden-window EOS regression and final recovery-message adjustment,11 focused tests passed. Ruff F/E9 and compilation clean. Real camera/microphone/video-only/portrait/virtual-output recording checks passed again after the final display-buffer change, including MP4 full decode, A/V timing and close finalization. Temporary media deleted and user1080p60/lossless/microphone/rotation preferences preserved.
+- Inspected actual read-only GTK Camera and recovery screenshots at1360x840 and980x640; the existing layout checks passed for all tabs and compact sizes. Updated README and DESIGN_NOTES with the measured behavior and GTK primary references. Left the actual English workspace open, on1080p60 with all ten Camera controls loaded.

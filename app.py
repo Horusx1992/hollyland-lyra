@@ -2,10 +2,16 @@
 """English GTK camera workspace for native Hollyland Lyra settings."""
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+import os
 import subprocess
 import datetime
 import time
 import uuid
+
+# GTK3's shared-memory Wayland path halves presentation cadence on this GPU.
+# Prefer GTK's GL compositor for this process; preserve explicit user overrides.
+# GDK retains its Cairo fallback if a GL context cannot be created.
+os.environ.setdefault('GDK_GL', 'always')
 
 import recording
 
@@ -236,7 +242,6 @@ class Window(Gtk.Window):
         root.pack_start(self.header, False, False, 0)
         self.access_button = button('Allow camera access', self.grant_access)
         self.access_button.set_no_show_all(True)
-        root.pack_start(self.access_button, False, False, 8)
         body = Gtk.Box(spacing=18)
         body.set_border_width(16)
         root.pack_start(body, True, True, 0)
@@ -309,8 +314,20 @@ class Window(Gtk.Window):
         self.sidebar.set_size_request(386, -1)
         self.sidebar.set_hexpand(False)
         self.sidebar.set_scrollable(True)
+        self.camera_page = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
+        self.camera_notice = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
+        self.camera_notice.set_no_show_all(True)
+        self.camera_notice.pack_start(label('Camera controls', 'section'), False, False, 0)
+        self.camera_notice_text = label('Reading camera settings…', 'muted')
+        self.camera_notice_text.set_line_wrap(True)
+        self.camera_notice.pack_start(self.camera_notice_text, False, False, 0)
+        self.camera_notice.pack_start(self.access_button, False, False, 0)
+        self.camera_retry_button = button('Retry connection', self.refresh)
+        self.camera_notice.pack_start(self.camera_retry_button, False, False, 0)
+        self.camera_page.pack_start(self.camera_notice, False, False, 0)
         self.controls = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
-        self.add_tab(self.controls, 'Camera')
+        self.camera_page.pack_start(self.controls, False, False, 0)
+        self.add_tab(self.camera_page, 'Camera')
         self.framing = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=16)
         self.add_tab(self.framing, 'Framing')
         self.record_options = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=16)
@@ -356,6 +373,7 @@ class Window(Gtk.Window):
         self.auto_poll_inflight = False
         self.auto_tick = GLib.timeout_add(1500, self.poll_auto)
         self.show_all()
+        self.show_camera_notice('Reading camera settings…')
         self.refresh_microphones()
         self.refresh()
 
@@ -388,6 +406,7 @@ class Window(Gtk.Window):
         self.refresh_button.set_sensitive(False)
         self.access_button.set_sensitive(False)
         self.empty_preview_button.set_sensitive(False)
+        self.camera_retry_button.set_sensitive(False)
         self.status.set_text(message)
         future = self.pool.submit(task)
         def completed(future):
@@ -395,16 +414,18 @@ class Window(Gtk.Window):
                 if self.closed:
                     return False
                 self.busy = False
-                self.controls.set_sensitive(True)
+                self.controls.set_sensitive(not self.camera_notice.get_visible())
                 self.refresh_button.set_sensitive(True)
                 self.access_button.set_sensitive(True)
                 self.empty_preview_button.set_sensitive(True)
+                self.camera_retry_button.set_sensitive(True)
                 try:
                     value = future.result()
                 except PermissionError as error:
                     self.status.set_text('Camera access is blocked. Click Allow camera access to continue.')
                     self.controls.set_sensitive(False)
                     self.access_button.show()
+                    self.camera_unavailable(error)
                     if failed:
                         failed(error)
                 except Exception as error:
@@ -420,9 +441,31 @@ class Window(Gtk.Window):
         return True
 
     def refresh(self, *_):
-        self.submit(camera.snapshot, self.loaded, 'Reading camera settings…')
+        self.submit(camera.snapshot, self.loaded, 'Reading camera settings…',
+                    failed=self.camera_unavailable)
+
+    def show_camera_notice(self, message):
+        self.camera_notice_text.set_text(message)
+        # no-show-all prevents the recovered state reappearing on parent.show_all.
+        for child in self.camera_notice.get_children():
+            if child is not self.access_button:
+                child.show_all()
+        self.camera_notice.show()
+
+    def camera_unavailable(self, error):
+        blocked = isinstance(error, PermissionError)
+        message = ('Camera access is blocked. Allow access to load zoom, '
+                   'image and exposure controls.' if blocked else
+                   f'Camera controls are unavailable: {error}. Connect your Lyra and retry.')
+        self.status.set_text(message)
+        self.show_camera_notice(message)
+        self.access_button.set_visible(blocked)
+        self.controls.set_sensitive(False)
 
     def loaded(self, data):
+        self.camera_notice.hide()
+        self.access_button.hide()
+        self.controls.set_sensitive(True)
         image_expanded = getattr(self, 'image_expander', None)
         image_expanded = image_expanded.get_expanded() if image_expanded else False
         exposure_expanded = getattr(self, 'exposure_expander', None)

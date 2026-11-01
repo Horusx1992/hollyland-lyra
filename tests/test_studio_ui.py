@@ -1,10 +1,11 @@
 """Studio interaction checks; no camera device, audio capture or video files."""
 import copy
+import time
 from unittest.mock import PropertyMock, patch
 import gi
 import pytest
 gi.require_version('Gtk','3.0')
-from gi.repository import Gtk
+from gi.repository import Gtk, GLib
 import app
 
 
@@ -86,3 +87,66 @@ def test_failed_preview_does_not_leave_a_stale_live_badge(window):
     assert window.placeholder.get_visible()
     assert window.preview_badge.get_text()=='STOPPED'
     assert not window.preview_badge.get_style_context().has_class('live')
+
+
+def test_camera_tab_explains_missing_settings_and_recovers(window):
+    window.camera_unavailable(PermissionError('denied'))
+    assert window.camera_notice.get_visible()
+    assert window.access_button.is_ancestor(window.camera_notice)
+    assert window.access_button.get_visible()
+    assert not window.controls.get_sensitive()
+    assert 'access' in window.camera_notice_text.get_text().lower()
+    window.loaded(camera_state())
+    assert not window.camera_notice.get_visible()
+    assert window.controls.get_sensitive()
+    assert len(window.rows) == 10
+
+
+def test_camera_tab_has_an_actionable_state_before_first_connection(tmp_path, monkeypatch):
+    if not Gtk.init_check()[0]:
+        pytest.skip('GTK display required')
+    monkeypatch.setenv('XDG_CONFIG_HOME', str(tmp_path))
+    with patch.object(app.Window, 'refresh'), patch.object(app.Window, 'refresh_microphones'), \
+         patch.object(Gtk, 'main_quit'):
+        instance = app.Window()
+        try:
+            assert instance.camera_notice.get_visible()
+            assert instance.camera_retry_button.get_visible()
+            instance.camera_unavailable(RuntimeError('Camera unplugged'))
+            assert 'Camera unplugged' in instance.camera_notice_text.get_text()
+            assert instance.camera_retry_button.get_sensitive()
+        finally:
+            instance.destroy()
+
+
+def test_real_refresh_callback_recovers_camera_tab_after_denied_access(tmp_path, monkeypatch):
+    if not Gtk.init_check()[0]:
+        pytest.skip('GTK display required')
+    monkeypatch.setenv('XDG_CONFIG_HOME', str(tmp_path))
+    def settle(instance):
+        deadline = time.monotonic() + 2
+        while instance.busy and time.monotonic() < deadline:
+            GLib.MainContext.default().iteration(False)
+            time.sleep(.001)
+        assert not instance.busy
+    with patch.object(app.camera, 'snapshot', side_effect=PermissionError('denied')) as read, \
+         patch.object(app.Window, 'refresh_microphones'), patch.object(Gtk, 'main_quit'):
+        instance = app.Window()
+        instance.auto_preview_started = True
+        try:
+            settle(instance)
+            assert instance.camera_notice.get_visible()
+            assert instance.access_button.get_visible()
+            assert instance.access_button.is_sensitive()
+            assert not instance.controls.is_sensitive()
+            read.side_effect = None
+            read.return_value = camera_state()
+            instance.camera_retry_button.emit('clicked')
+            settle(instance)
+            assert not instance.camera_notice.get_visible()
+            assert instance.controls.is_sensitive()
+            assert len(instance.rows) == 10
+            instance.show_all()
+            assert not instance.camera_notice.get_visible()
+        finally:
+            instance.destroy()
