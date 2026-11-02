@@ -46,14 +46,22 @@ def snapshot():
 
 
 def initial_profile():
-    profile = json.loads((Path(__file__).parent/'initial_camera_profile.json').read_text())
+    return load_profile('initial_camera_profile.json')
+
+
+def medium_light_profile():
+    return load_profile('medium_light_profile.json')
+
+
+def load_profile(filename):
+    profile = json.loads((Path(__file__).parent/filename).read_text())
     if profile.get('schema') != 1 or set(profile.get('settings', {})) != set(IMAGE_SETTINGS):
-        raise CameraError('The original camera profile is invalid.')
+        raise CameraError('The camera profile is invalid.')
     for name, entry in profile['settings'].items():
         if set(entry) != {'value', 'automatic'} or not isinstance(entry['automatic'], bool):
-            raise CameraError(f'Invalid original setting: {name}')
+            raise CameraError(f'Invalid profile setting: {name}')
         if not isinstance(entry['value'], (str, int, float)):
-            raise CameraError(f'Invalid original value: {name}')
+            raise CameraError(f'Invalid profile value: {name}')
     return profile
 
 
@@ -62,7 +70,7 @@ def profile_value(name, setting, entry):
     if 'list' in setting:
         options = [str(item) for item in setting['list']]
         if str(value) not in options:
-            raise CameraError(f'{SETTINGS[name]} no longer supports the original value {value}.')
+            raise CameraError(f'{SETTINGS[name]} no longer supports the profile value {value}.')
         value = options.index(str(value))
     return validate(name, value, setting, entry['automatic'])
 
@@ -83,10 +91,18 @@ def restore_image_state(state):
 
 def reset_image_defaults():
     """Restore the first verified profile, including Auto; never trust mutable def."""
+    return apply_image_profile(initial_profile())
+
+
+def apply_medium_light_profile():
+    return apply_image_profile(medium_light_profile())
+
+
+def apply_image_profile(profile):
+    """Apply a bundled image profile with capability readback and rollback."""
     with _lock:
-        profile = initial_profile()
         if read('info').get('module') != profile['model']:
-            raise CameraError('The original image profile does not match this camera model.')
+            raise CameraError('The image profile does not match this camera model.')
         before = {name: read(name) for name in IMAGE_SETTINGS}
         order = ('anti-flicker',) + tuple(name for name in IMAGE_SETTINGS if name != 'anti-flicker')
         applied = {}
@@ -99,7 +115,7 @@ def reset_image_defaults():
                     continue
                 entry = profile['settings'][name]
                 value = profile_value(name, setting, entry)
-                # Establish the original manual value before enabling Auto.
+                # Establish the profile's remembered manual value before Auto.
                 # This also restores the firmware's remembered manual baseline.
                 if entry['automatic']:
                     apply(name, value, False)
@@ -110,7 +126,7 @@ def reset_image_defaults():
                 rollback = 'Previous image settings restored.'
             except Exception as restore_error:
                 rollback = f'Could not fully restore previous settings: {restore_error}'
-            raise CameraError(f'Reset stopped at {SETTINGS[name]}. {rollback} {error}') from error
+            raise CameraError(f'Image profile stopped at {SETTINGS[name]}. {rollback} {error}') from error
         return {'settings': applied, 'skipped': skipped, 'mode_changes': [], 'snapshot': snapshot()}
 
 

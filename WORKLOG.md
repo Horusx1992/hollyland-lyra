@@ -1,5 +1,13 @@
 # Implementation contract
 
+## Medium light default — 2026-11-01
+
+- Outcome: apply and remember a neutral medium indoor lighting starting profile on this Lyra.
+- Acceptance: 50Hz anti-flicker, verified1/100 shutter for existing1080p60, adaptive ISO/AWB, neutral image controls; user can reapply/disable startup selection.
+- Invariants: original Reset profile, zoom, media preferences and recordings retained; model/capability validation and rollback; save previous image state before live changes.
+- Scope: bundled profile → shared verified image apply → opt-in per-user startup preference and Camera actions → native readback and focused regressions.
+- Evidence: original-state backup; readback of all eight native image controls; startup applies once, reconnect retry and Reset clearing custom selection tested; no live image retained.
+
 ## Preview cadence and missing Camera controls — 2026-11-01
 
 - Outcome: smooth 1080p60 preview and visible/recoverable camera-control state.
@@ -145,3 +153,11 @@ Remaining optional work: embedded video preview, autofocus/AI/audio controls, re
 - Missing Camera controls reproduced as PermissionError on the reconnected identity/descriptor-verified Lyra HID interface. Restored temporary access using the existing helper. Camera now contains explicit loading/access/retry states; verified successful reads replace them with all ten native rows. Stale rows remain disabled on failure. Actual asynchronous denied-refresh/retry callbacks are covered, not only a mock layout.
 - Full regression suite172 passed; after adding a hidden-window EOS regression and final recovery-message adjustment,11 focused tests passed. Ruff F/E9 and compilation clean. Real camera/microphone/video-only/portrait/virtual-output recording checks passed again after the final display-buffer change, including MP4 full decode, A/V timing and close finalization. Temporary media deleted and user1080p60/lossless/microphone/rotation preferences preserved.
 - Inspected actual read-only GTK Camera and recovery screenshots at1360x840 and980x640; the existing layout checks passed for all tabs and compact sizes. Updated README and DESIGN_NOTES with the measured behavior and GTK primary references. Left the actual English workspace open, on1080p60 with all ten Camera controls loaded.
+
+## Medium light default delivered — 2026-11-01
+
+- Saved original pre-change state in artifacts/before-medium-light-20261101T142210Z.json, mode0600. Applied actual native50Hz anti-flicker, manual1/100 shutter, Auto ISO/WB (remembered250/5100 baselines), brightness/contrast/saturation0 and sharpness50. Verified all eight image settings and unchanged1x zoom/AF-C.50Hz mode reports shutter choices1/50 and1/100 with shutter Auto unavailable; selected1/100 by label after that dependency change. This is a neutral indoor starting point, not scene-measured exposure.
+- Added medium_light_profile.json separately from the unchanged first-setup defaults. Shared verified image-profile apply retains model/range validation, label mapping, independent readback and partial-failure rollback. No arbitrary firmware commands.
+- Added Apply Medium light and Use Medium light on startup to Camera; saved this user's startup selection. Startup applies once and normal Refresh only reads. Permission failure keeps startup pending for authorization/retry. A successful original Reset clears the custom startup selection. Media preferences1080p60/lossless/selected microphone/rotation were preserved.
+- Actual startup integration applied the selected profile and loaded all ten native controls with the checked startup option.179 pytest regressions passed; Ruff F/E9 and compilation clean. New tests cover50Hz shutter-list changes, unsupported-shutter rollback, one-time startup, denied-access retry, no-write when unselected, and default clearing through the actual Reset callback.
+- Rendered/inspected the new Camera controls and compact layouts with video stopped; artifacts/medium-light-camera.png contains no live image. Documented the custom preset, original Reset and primary shutter guidance in README. Reopened the updated actual application after verifying no MP4 recording was active; final native readback confirmed the saved medium-light profile.

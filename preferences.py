@@ -34,7 +34,7 @@ def save_rotation(value):
 
 
 def save_option(name, value):
-    if name not in ('rotation', 'microphone', 'record_folder', 'capture_mode', 'record_quality'):
+    if name not in ('rotation', 'microphone', 'record_folder', 'capture_mode', 'record_quality', 'startup_camera_profile'):
         raise ValueError('Unknown preference')
     data = load_options()
     data[name] = value

@@ -32,9 +32,21 @@ The English, left-to-right studio layout puts a large monitor beside a compact i
 
 Manual camera values use **Apply** and are independently read back. **Auto applies immediately when toggled**, with no extra Apply click. Auto values are periodically refreshed from the device. Read-only controls are disabled; **Refresh camera** reads all settings again.
 
-### Reset image and exposure
+### Medium indoor light profile
+
+**Apply Medium light** in Camera applies a neutral indoor starting point: **50Hz anti-flicker**, fixed **1/100 shutter** (usable with the existing1080p60 mode), **Auto ISO**, **Auto white balance**, brightness/contrast/saturation **0**, and sharpness **50**. ISO250 and5100K are remembered manual baselines; Auto can select different actual values. This is a practical starting profile, not a measured exposure or factory calibration. Its50Hz setting assumes local50Hz lighting; unusual LED dimmers may need a different shutter.
+
+The shutter choice follows the general50Hz flicker guidance in [Sony's camera support article](https://www.sony.com/electronics/support/camcorders-and-video-cameras-hard-drive-camcorders/articles/00122281); the actual Lyra choices and Auto flags were independently verified on this device.
+
+Applying it also selects **Use Medium light on startup**. This option is currently enabled for this user. On each launch, the profile is applied and independently read back once; ordinary Refresh does not reapply it or overwrite later adjustments. If access is blocked, the pending startup application is retried after **Allow camera access**. Uncheck the option to keep the camera's current settings on future launches. Capture quality, zoom, framing, audio and recording preferences are unchanged.
+
+The profile is stored in `medium_light_profile.json`, separately from the original setup profile. The backend validates model/ranges/current choices, maps shutter choices after anti-flicker changes, and attempts rollback on partial failure. The pre-change image snapshot is retained locally under `artifacts/before-medium-light-*.json`.
+
+### Reset to the original image profile
 
 Click **Reset to defaults** under **Image & exposure** to restore the original Lyra profile captured at first setup, including its Auto modes. Camera zoom, framing and recording preferences are unchanged. This is a verified image-settings restore, not an undocumented firmware/factory-reset command.
+
+A successful original reset also disables **Use Medium light on startup**, so the next launch keeps the restored values. You can select the Medium light profile again at any time.
 
 | Setting | Original profile |
 | --- | --- |
@@ -121,6 +133,7 @@ lyra-control/
 ├── setup_virtual_camera.py   Temporary v4l2loopback setup
 ├── preferences.py            Local capture/quality/orientation/audio preferences
 ├── initial_camera_profile.json Original verified image defaults and Auto modes
+├── medium_light_profile.json Neutral50Hz indoor starting profile
 ├── lyra_backend.py           Native controls, defaults and readback
 ├── lyra_probe.py             Narrow HID protocol and device discovery
 ├── grant_lyra_access.py      Identity-based HID access helper

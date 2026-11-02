@@ -150,3 +150,19 @@ def test_real_refresh_callback_recovers_camera_tab_after_denied_access(tmp_path,
             assert not instance.camera_notice.get_visible()
         finally:
             instance.destroy()
+
+
+def test_medium_light_action_remembers_default_and_original_reset_clears_it(window):
+    result = {'snapshot': camera_state(), 'settings': {}, 'mode_changes': [], 'skipped': []}
+    def submit(task, done, *_args, **_kwargs):
+        done(task())
+        return True
+    window.submit = submit
+    with patch.object(app.camera, 'apply_medium_light_profile', return_value=result), \
+         patch.object(app.camera, 'reset_image_defaults', return_value=result):
+        window.medium_light_button.emit('clicked')
+        assert window.profile_check.get_active()
+        assert app.preferences.load_option('startup_camera_profile', 'none') == 'medium-light'
+        window.reset_button.emit('clicked')
+        assert not window.profile_check.get_active()
+        assert app.preferences.load_option('startup_camera_profile', '') == 'none'

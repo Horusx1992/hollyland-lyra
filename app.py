@@ -205,6 +205,7 @@ class Window(Gtk.Window):
         self.preview_only = self.is_fullscreen = self.auto_preview_started = False
         self.auth_process = None
         self.rows = {}
+        self.startup_profile_pending = preferences.load_option('startup_camera_profile', 'none') == 'medium-light'
         self.mics = []
         self.last_recording = None
         self.record_folder = Path(preferences.load_option('record_folder', str(Path.home()/'Videos/Lyra Control')))
@@ -441,8 +442,15 @@ class Window(Gtk.Window):
         return True
 
     def refresh(self, *_):
-        self.submit(camera.snapshot, self.loaded, 'Reading camera settings…',
+        self.submit(self.load_camera_settings, self.loaded, 'Reading camera settings…',
                     failed=self.camera_unavailable)
+
+    def load_camera_settings(self):
+        if self.startup_profile_pending:
+            result = camera.apply_medium_light_profile()
+            self.startup_profile_pending = False
+            return dict(result['snapshot'], applied_profile='Medium light')
+        return camera.snapshot()
 
     def show_camera_notice(self, message):
         self.camera_notice_text.set_text(message)
@@ -473,6 +481,16 @@ class Window(Gtk.Window):
         for child in self.controls.get_children():
             child.destroy()
         self.rows = {}
+        profile_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        self.medium_light_button = button('Apply Medium light', self.apply_medium_light)
+        self.medium_light_button.set_tooltip_text('Neutral image, Auto ISO and white balance, 50Hz anti-flicker and 1/100 shutter. Zoom is unchanged.')
+        profile_box.pack_start(self.medium_light_button, False, False, 0)
+        self.profile_check = Gtk.CheckButton(label='Use Medium light on startup')
+        self.profile_check.set_active(preferences.load_option('startup_camera_profile', 'none') == 'medium-light')
+        self.profile_check.connect('toggled', lambda item: preferences.save_option(
+            'startup_camera_profile', 'medium-light' if item.get_active() else 'none'))
+        profile_box.pack_start(self.profile_check, False, False, 0)
+        self.controls.pack_start(profile_box, False, False, 0)
         self.device_label.set_text(f"Hollyland Lyra · {data['info'].get('swVer', '')}")
         values = data['settings']
         zoom = SettingRow(self, 'zoom', values['zoom'], zoom=True)
@@ -484,7 +502,7 @@ class Window(Gtk.Window):
         heading.pack_start(label('Image & exposure', 'section'), True, True, 0)
         self.reset_button = button('Reset to defaults', self.reset_image)
         self.reset_button.get_style_context().add_class('flat')
-        self.reset_button.set_tooltip_text('Restore the first verified Lyra settings, including Anti-flicker OFF and Auto modes. Zoom is unchanged.')
+        self.reset_button.set_tooltip_text('Restore the first verified Lyra settings, including Anti-flicker OFF and Auto modes. Disables the Medium light startup profile. Zoom is unchanged.')
         heading.pack_end(self.reset_button, False, False, 0)
         self.controls.pack_start(heading, False, False, 0)
         note = label('Auto applies instantly. Apply saves manual values.', 'muted')
@@ -510,7 +528,8 @@ class Window(Gtk.Window):
             else:
                 self.image_expander = expander
         self.controls.show_all()
-        self.status.set_text('Connected. Camera settings are up to date.')
+        self.status.set_text('Connected. Medium light startup profile applied.' if data.get('applied_profile') else
+                             'Connected. Camera settings are up to date.')
         if not self.auto_preview_started:
             self.auto_preview_started = True
             self.preview()
@@ -518,10 +537,19 @@ class Window(Gtk.Window):
     def reset_image(self, *_):
         def done(result):
             self.loaded(result['snapshot'])
+            self.profile_check.set_active(False)
             note = ' Camera changed Auto availability.' if result['mode_changes'] else ''
             skipped = f" {len(result['skipped'])} unavailable controls skipped." if result['skipped'] else ''
             self.status.set_text(f"Reset {len(result['settings'])} settings; zoom unchanged.{note}{skipped}")
         self.submit(camera.reset_image_defaults, done, 'Restoring image and exposure defaults…')
+
+    def apply_medium_light(self, *_):
+        def done(result):
+            self.loaded(result['snapshot'])
+            self.profile_check.set_active(True)
+            self.startup_profile_pending = False
+            self.status.set_text('Medium light applied and selected for startup. Auto ISO / white balance · 50Hz · 1/100.')
+        self.submit(camera.apply_medium_light_profile, done, 'Applying Medium light profile…')
 
     def authorize(self, helper):
         if self.closed:
@@ -545,7 +573,7 @@ class Window(Gtk.Window):
     def grant_access(self, *_):
         def grant():
             self.authorize('grant_lyra_access.py')
-            return camera.snapshot()
+            return self.load_camera_settings()
         self.submit(grant, self.loaded, 'Waiting for system authorization…')
 
     def preview(self, *_):

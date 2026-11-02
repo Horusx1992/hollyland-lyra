@@ -17,7 +17,9 @@ def test_recording_choices_do_not_erase_orientation(tmp_path, monkeypatch):
     preferences.save_rotation(90)
     preferences.save_option('microphone', 'usb-mic')
     preferences.save_option('record_folder', '/tmp/My Videos')
+    preferences.save_option('startup_camera_profile', 'medium-light')
     preferences.save_rotation(270)
     assert preferences.load_rotation() == 270
     assert preferences.load_option('microphone', 'default') == 'usb-mic'
     assert preferences.load_option('record_folder', '') == '/tmp/My Videos'
+    assert preferences.load_option('startup_camera_profile', 'none') == 'medium-light'

@@ -1,0 +1,15 @@
+{
+  "schema": 1,
+  "model": "C4502",
+  "source": "User's medium indoor light starting profile: neutral image, adaptive ISO/AWB, 50Hz lighting and 1/100 shutter compatible with 60fps. This is not a factory calibration or measured scene exposure.",
+  "settings": {
+    "anti-flicker": {"value": "50Hz", "automatic": false},
+    "white-balance": {"value": 5100, "automatic": true},
+    "shutter": {"value": "1/100", "automatic": false},
+    "iso": {"value": "250", "automatic": true},
+    "brightness": {"value": 0, "automatic": false},
+    "contrast": {"value": 0, "automatic": false},
+    "saturation": {"value": 0, "automatic": false},
+    "sharpness": {"value": 50, "automatic": false}
+  }
+}
